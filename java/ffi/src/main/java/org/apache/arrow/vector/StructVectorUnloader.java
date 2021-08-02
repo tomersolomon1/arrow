@@ -29,7 +29,7 @@ import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 
 /**
- * Helper class that handles converting a {@link VectorSchemaRoot}
+ * Helper class that handles converting a {@link StructVector}
  * to a {@link ArrowRecordBatch}.
  */
 public class StructVectorUnloader {
@@ -40,7 +40,7 @@ public class StructVectorUnloader {
   private final boolean alignBuffers;
 
   /**
-   * Constructs a new instance of the given set of vectors.
+   * Constructs a new instance of the given struct vector.
    */
   public StructVectorUnloader(StructVector root) {
     this(root, true, NoCompressionCodec.INSTANCE, true);
@@ -49,7 +49,7 @@ public class StructVectorUnloader {
   /**
    * Constructs a new instance.
    *
-   * @param root  The set of vectors to serialize to an {@link ArrowRecordBatch}.
+   * @param root  The struct vector to serialize to an {@link ArrowRecordBatch}.
    * @param includeNullCount Controls whether null count is copied to the {@link ArrowRecordBatch}
    * @param alignBuffers Controls if buffers get aligned to 8-byte boundaries.
    */
@@ -61,7 +61,7 @@ public class StructVectorUnloader {
   /**
    * Constructs a new instance.
    *
-   * @param root  The set of vectors to serialize to an {@link ArrowRecordBatch}.
+   * @param root  The struct vector to serialize to an {@link ArrowRecordBatch}.
    * @param includeNullCount Controls whether null count is copied to the {@link ArrowRecordBatch}
    * @param codec the codec for compressing data. If it is null, then no compression is needed.
    * @param alignBuffers Controls if buffers get aligned to 8-byte boundaries.

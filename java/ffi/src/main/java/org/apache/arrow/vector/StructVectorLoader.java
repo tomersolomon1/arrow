@@ -37,7 +37,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 /**
- * Loads buffers into vectors.
+ * Loads buffers into {@link StructVector}.
  */
 public class StructVectorLoader {
 
@@ -51,8 +51,7 @@ public class StructVectorLoader {
   private boolean decompressionNeeded;
 
   /**
-   * Construct with a root to load and will create children in root based on
-   * schema.
+   * Construct with a schema.
    *
    * @param schema buffers are added based on schema.
    */
@@ -61,8 +60,7 @@ public class StructVectorLoader {
   }
 
   /**
-   * Construct with a root to load and will create children in root based on
-   * schema.
+   * Construct with a schema and a compression codec factory.
    *
    * @param schema  buffers are added based on schema.
    * @param factory the factory to create codec.
@@ -73,7 +71,10 @@ public class StructVectorLoader {
   }
 
   /**
-   * Loads the record batch in the vectors. will not close the record batch
+   * Loads the record batch into the struct vector. 
+   * 
+   * <p>
+   * This will not close the record batch.
    *
    * @param recordBatch the batch to load
    */
