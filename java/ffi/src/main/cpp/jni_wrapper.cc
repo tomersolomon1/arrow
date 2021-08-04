@@ -20,6 +20,7 @@
 #include <cassert>
 #include "abi.h"
 #include <stdint.h>
+#include <string>
 #include <inttypes.h>
 
 #include "org_apache_arrow_ffi_jni_JniWrapper.h"
