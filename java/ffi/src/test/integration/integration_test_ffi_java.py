@@ -15,45 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import json
 import os
 import pyarrow as pa
-import pyarrow.jvm as pa_jvm
-import pytest
 import sys
 import xml.etree.ElementTree as ET
-
 import gc
-
-try:
-    from pyarrow.cffi import ffi
-except ImportError:
-    ffi = None
-
-import pytest
-# jpype = pytest.importorskip("jpype")
+import unittest
 import jpype
-
-try:
-    import pandas as pd
-    import pandas.testing as tm
-except ImportError:
-    pd = tm = None
-
-needs_cffi = pytest.mark.skipif(ffi is None,
-                                reason="test needs cffi package installed")
-
-assert_schema_released = pytest.raises(
-    ValueError, match="Cannot import released ArrowSchema")
-
-assert_array_released = pytest.raises(
-    ValueError, match="Cannot import released ArrowArray")
-
-assert_stream_released = pytest.raises(
-    ValueError, match="Cannot import released ArrowArrayStream")
+import decimal
+import contextlib
 
 
-def get_root_allocator():
+def setup_jvm():
     # This test requires Arrow Java to be built in the same source tree
     try:
         arrow_dir = os.environ["ARROW_SOURCE_DIR"]
@@ -81,160 +54,89 @@ def get_root_allocator():
     jpype.startJVM(jpype.getDefaultJVMPath(), "-Djava.class.path=" + jar_path, "-Xint", "-Xdebug", "-Xnoagent",
                    "-Xrunjdwp:transport=dt_socket,server=y,address=12999,suspend=n",
                    **kwargs)
-    return jpype.JPackage("org").apache.arrow.memory.RootAllocator(sys.maxsize)
 
 
-@needs_cffi
-def test_pjp_array_1(root_allocator):
-    arrow_array_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(root_allocator)
-    arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(root_allocator)
-    arrow_arr_ptr_pj = arrow_array_pj.memoryAddress()
-    arrow_schema_ptr_pj = arrow_schema_pj.memoryAddress()
+class TestPythonToJava(unittest.TestCase):
+    def setUp(self):
+        gc.collect()
+        self.old_allocated_python = pa.total_allocated_bytes()
+        self.allocator = jpype.JPackage("org").apache.arrow.memory.RootAllocator(sys.maxsize)
 
-    gc.collect()  # Make sure no Arrow data dangles in a ref cycle
-    old_allocated = pa.total_allocated_bytes()
+    def tearDown(self):
+        self.allocator.close()
+        gc.collect()
+        diff_python = pa.total_allocated_bytes() - self.old_allocated_python
+        self.assertEqual(
+            pa.total_allocated_bytes(), self.old_allocated_python,
+            f"PyArrow memory was not adequately released: {diff_python} bytes lost")
+        self.allocator.close()
 
-    arr = pa.array([1, 2, 3], type=pa.int32())
-    py_value = arr.to_pylist()
+    def test_string_roundtrip(self):
+        arr = pa.array(["a", None, "ccc"])
+        self.roundtrip_array(arr)
 
-    # Export from pyarrow
-    print("Export from pyarrow")
-    arr._export_to_c(arrow_arr_ptr_pj, arrow_schema_ptr_pj)
-    del arr
+    def test_decimal_roundtrip(self):
+        data = [
+            round(decimal.Decimal(722.82), 2),
+            round(decimal.Decimal(-934.11), 2),
+            None,
+        ]
+        arr = pa.array(data, pa.decimal128(5, 2))
+        self.roundtrip_array(arr)
 
-    # Import into Java
-    print("importing to java")
-    vector = jpype.JPackage("org").apache.arrow.ffi.FFI.importVector(root_allocator, arrow_array_pj, arrow_schema_pj)
+    def test_int_roundtrip(self):
+        arr = pa.array([1, 2, 3], type=pa.int32())
+        self.roundtrip_array(arr)
 
-    # Export from Java
-    print("Export from Java")
-    arrow_array_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(root_allocator)
-    arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(root_allocator)
-    arrow_arr_ptr_jp = arrow_array_jp.memoryAddress()
-    arrow_schema_ptr_jp = arrow_schema_jp.memoryAddress()
-    jpype.JPackage("org").apache.arrow.ffi.FFI.exportVector(root_allocator, vector, arrow_array_jp, arrow_schema_jp)
+    #def test_list_array(self):
+    #    arr = pa.array(
+    #        [[], [0], [1, 2], [4, 5, 6]], pa.list_(pa.int64())
+    #    )
+    #    self.roundtrip_array(arr)
 
-    # Import back to pyarrow
-    print("Import back to pyarrow")
-    arr_new = pa.Array._import_from_c(arrow_arr_ptr_jp, arrow_schema_ptr_jp)
-    # Assert everything is fine
-    assert arr_new.to_pylist() == py_value
-    assert arr_new.type == pa.int32()
-    assert pa.total_allocated_bytes() > old_allocated
+    def roundtrip_array(self, original_arr):
+        arrow_array_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(self.allocator)
+        arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
+        arrow_arr_ptr_pj = arrow_array_pj.memoryAddress()
+        arrow_schema_ptr_pj = arrow_schema_pj.memoryAddress()
+        py_value = original_arr.to_pylist()
+        py_type = original_arr.type
 
-    del arr_new
-    del vector
-    del arrow_array_pj
-    del arrow_schema_pj
-    del arrow_array_jp
-    del arrow_schema_jp
-    del root_allocator
+        # Export from pyarrow
+        print("Export from pyarrow")
+        original_arr._export_to_c(arrow_arr_ptr_pj, arrow_schema_ptr_pj)
+        del original_arr
 
-    assert pa.total_allocated_bytes() == old_allocated  # doesn't pass yet
+        # Import into Java
+        print("importing to java")
+        vector = jpype.JPackage("org").apache.arrow.ffi.FFI.importVector(self.allocator, arrow_array_pj, arrow_schema_pj)
 
-    # Now released
-    with assert_schema_released:
-        pa.Array._import_from_c(arrow_arr_ptr_pj, arrow_schema_ptr_pj)
-        pa.Array._import_from_c(arrow_arr_ptr_jp, arrow_schema_ptr_jp)
-    print("end of test_pjp_array")
+        # Export from Java
+        print("Export from Java")
+        arrow_array_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(self.allocator)
+        arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
+        arrow_arr_ptr_jp = arrow_array_jp.memoryAddress()
+        arrow_schema_ptr_jp = arrow_schema_jp.memoryAddress()
+        jpype.JPackage("org").apache.arrow.ffi.FFI.exportVector(self.allocator, vector, arrow_array_jp, arrow_schema_jp)
 
+        # Import back to pyarrow
+        print("Import back to pyarrow")
+        arr_new = pa.Array._import_from_c(arrow_arr_ptr_jp, arrow_schema_ptr_jp)
 
-@needs_cffi
-def test_pjp_array_2(root_allocator):
-    # Allocating python -> java structs
-    c_schema_pj = ffi.new("struct ArrowSchema*")
-    ptr_schema_pj = int(ffi.cast("uintptr_t", c_schema_pj))
-    c_array_pj = ffi.new("struct ArrowArray*")
-    ptr_array_pj = int(ffi.cast("uintptr_t", c_array_pj))
+        # Assert everything is fine
+        assert arr_new.to_pylist() == py_value
+        assert arr_new.type == py_type
 
-    # Allocating Java -> Python structs
-    c_schema_jp = ffi.new("struct ArrowSchema*")
-    ptr_schema_jp = int(ffi.cast("uintptr_t", c_schema_jp))
-    c_array_jp = ffi.new("struct ArrowArray*")
-    ptr_array_jp = int(ffi.cast("uintptr_t", c_array_jp))
+        del arr_new
 
-    gc.collect()  # Make sure no Arrow data dangles in a ref cycle
-    old_allocated = pa.total_allocated_bytes()
-
-    arr = pa.array([1, 2, 3], type=pa.int32())
-    py_value = arr.to_pylist()
-
-    # Export from pyarrow
-    print("Export from pyarrow")
-    arr._export_to_c(ptr_array_pj, ptr_schema_pj)
-    del arr
-
-    # Import into Java
-    print("importing to java")
-    arrow_array_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.wrap(ptr_array_pj)
-    arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.wrap(ptr_schema_pj)
-    print("managed wrapping, now importing")
-    vector = jpype.JPackage("org").apache.arrow.ffi.FFI.importVector(root_allocator, arrow_array_pj, arrow_schema_pj)
-
-    # Export from Java
-    print("Export from Java")
-    arrow_array_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.wrap(ptr_array_jp)
-    arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.wrap(ptr_schema_jp)
-    jpype.JPackage("org").apache.arrow.ffi.FFI.exportVector(root_allocator, vector, arrow_array_jp, arrow_schema_jp)
-
-    # Import back to pyarrow
-    print("Import back to pyarrow")
-    arr_new = pa.Array._import_from_c(ptr_array_jp, ptr_schema_jp)
-
-    # Assert everything is fine
-    assert arr_new.to_pylist() == py_value
-    assert arr_new.type == pa.int32()
-    assert pa.total_allocated_bytes() > old_allocated
-    del arr_new
-    del vector
-    del c_schema_pj
-    del c_array_pj
-    del c_schema_jp
-    del c_array_jp
-
-    del arrow_array_pj
-    del arrow_schema_pj
-    del arrow_array_jp
-    del arrow_schema_jp
-
-    del root_allocator
-    assert pa.total_allocated_bytes() == old_allocated  # doesn't pass yet
-    # Now released
-    print("passed checks, releasing")
-    with assert_schema_released:
-        pa.Array._import_from_c(ptr_array_pj, ptr_schema_pj)
-        pa.Array._import_from_c(ptr_array_jp, ptr_schema_jp)
+        vector.close()
+        arrow_array_pj.close()
+        arrow_schema_pj.close()
+        arrow_array_jp.close()
+        arrow_schema_jp.close()
+        print("end of test_pjp_array")
 
 
-# The original test from test_cffi
-def test_3():
-    c_schema = ffi.new("struct ArrowSchema*")
-    ptr_schema = int(ffi.cast("uintptr_t", c_schema))
-    c_array = ffi.new("struct ArrowArray*")
-    ptr_array = int(ffi.cast("uintptr_t", c_array))
-
-    gc.collect()  # Make sure no Arrow data dangles in a ref cycle
-    old_allocated = pa.total_allocated_bytes()
-
-    # Type is exported and imported at the same time
-    arr = pa.array([1, 2, 3], type=pa.int32())
-    py_value = arr.to_pylist()
-    arr._export_to_c(ptr_array, ptr_schema)
-    # Delete and recreate C++ objects from exported pointers
-    del arr
-    arr_new = pa.Array._import_from_c(ptr_array, ptr_schema)
-    assert arr_new.to_pylist() == py_value
-    assert arr_new.type == pa.int32()
-    assert pa.total_allocated_bytes() > old_allocated
-    del arr_new
-    assert pa.total_allocated_bytes() == old_allocated
-    # Now released
-    with assert_schema_released:
-        pa.Array._import_from_c(ptr_array, ptr_schema)
-
-
-if __name__ == "__main__":
-    allocator = get_root_allocator()
-    print("created allocator")
-    test_pjp_array_2(allocator)
-    test_3()
+if __name__ == '__main__':
+    setup_jvm()
+    unittest.main(verbosity=2)
