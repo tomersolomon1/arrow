@@ -23,7 +23,6 @@ import gc
 import unittest
 import jpype
 import decimal
-import contextlib
 
 
 def setup_jvm():
@@ -71,30 +70,40 @@ class TestPythonToJava(unittest.TestCase):
             f"PyArrow memory was not adequately released: {diff_python} bytes lost")
         self.allocator.close()
 
-    def test_string_roundtrip(self):
-        arr = pa.array(["a", None, "ccc"])
-        self.roundtrip_array(arr)
+    def gtest_string_with_none_roundtrip(self):
+        def string_array_generator():
+            return pa.array(["a", None, "ccc"])
+        self.roundtrip_array_test(string_array_generator)
+
+    def test_string_without_none_roundtrip(self):
+        def string_array_generator():
+            return pa.array(["a", "bb", "ccc"])
+        self.roundtrip_array_test(string_array_generator)
 
     def test_decimal_roundtrip(self):
-        data = [
-            round(decimal.Decimal(722.82), 2),
-            round(decimal.Decimal(-934.11), 2),
-            None,
-        ]
-        arr = pa.array(data, pa.decimal128(5, 2))
-        self.roundtrip_array(arr)
+        def decimal_array_generator():
+            data = [
+                round(decimal.Decimal(722.82), 2),
+                round(decimal.Decimal(-934.11), 2),
+                None,
+            ]
+            return pa.array(data, pa.decimal128(5, 2))
+        self.roundtrip_array_test(decimal_array_generator)
 
     def test_int_roundtrip(self):
-        arr = pa.array([1, 2, 3], type=pa.int32())
-        self.roundtrip_array(arr)
+        def int_array_generator():
+            return pa.array([1, 2, 3], type=pa.int32())
+        self.roundtrip_array_test(int_array_generator)
 
-    #def test_list_array(self):
-    #    arr = pa.array(
-    #        [[], [0], [1, 2], [4, 5, 6]], pa.list_(pa.int64())
-    #    )
-    #    self.roundtrip_array(arr)
+    def gtest_list_array(self):
+        def list_array_generator():
+            return pa.array(
+                [[], [0], [1, 2], [4, 5, 6]], pa.list_(pa.int64())
+            )
+        self.roundtrip_array_test(list_array_generator)
 
-    def roundtrip_array(self, original_arr):
+    def roundtrip_array_test(self, array_generator):
+        original_arr = array_generator()
         arrow_array_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(self.allocator)
         arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
         arrow_arr_ptr_pj = arrow_array_pj.memoryAddress()
@@ -134,7 +143,7 @@ class TestPythonToJava(unittest.TestCase):
         arrow_schema_pj.close()
         arrow_array_jp.close()
         arrow_schema_jp.close()
-        print("end of test_pjp_array")
+        print("end of roundtrip_array_test")
 
 
 if __name__ == '__main__':
