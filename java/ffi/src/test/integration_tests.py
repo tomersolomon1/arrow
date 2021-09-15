@@ -70,13 +70,11 @@ class TestPythonToJava(unittest.TestCase):
             f"PyArrow memory was not adequately released: {diff_python} bytes lost")
         self.allocator.close()
 
-    @unittest.skip("faulty test")
     def test_string_with_none_roundtrip(self):
         def string_array_generator():
             return pa.array(["a", None, "ccc"])
         self.roundtrip_array_test(string_array_generator)
 
-    @unittest.skip("faulty test")
     def test_string_without_none_roundtrip(self):
         def string_array_generator():
             return pa.array(["a", "bb", "ccc"])
@@ -97,7 +95,6 @@ class TestPythonToJava(unittest.TestCase):
             return pa.array([1, 2, 3], type=pa.int32())
         self.roundtrip_array_test(int_array_generator)
 
-    @unittest.skip("faulty test")
     def test_list_array(self):
         def list_array_generator():
             return pa.array(
@@ -121,7 +118,8 @@ class TestPythonToJava(unittest.TestCase):
 
         # Import into Java
         print("importing to java")
-        vector = jpype.JPackage("org").apache.arrow.ffi.FFI.importVector(self.allocator, arrow_array_pj, arrow_schema_pj)
+        vector = jpype.JPackage("org").apache.arrow.ffi.FFI.importVector(self.allocator, arrow_array_pj,
+                                                                         arrow_schema_pj, None)
 
         # Export from Java
         print("Export from Java")
@@ -129,7 +127,7 @@ class TestPythonToJava(unittest.TestCase):
         arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
         arrow_arr_ptr_jp = arrow_array_jp.memoryAddress()
         arrow_schema_ptr_jp = arrow_schema_jp.memoryAddress()
-        jpype.JPackage("org").apache.arrow.ffi.FFI.exportVector(self.allocator, vector, arrow_array_jp, arrow_schema_jp)
+        jpype.JPackage("org").apache.arrow.ffi.FFI.exportVector(self.allocator, vector, None, arrow_array_jp, arrow_schema_jp)
 
         # Import back to pyarrow
         print("Import back to pyarrow")
