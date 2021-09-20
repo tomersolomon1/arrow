@@ -70,17 +70,12 @@ class TestPythonToJava(unittest.TestCase):
             f"PyArrow memory was not adequately released: {diff_python} bytes lost")
         self.allocator.close()
 
-    def test_string_with_none_roundtrip(self):
+    def test_string_array(self):
         def string_array_generator():
-            return pa.array(["a", None, "ccc"])
-        self.roundtrip_array_test(string_array_generator)
+            return pa.array([None, "a", "bb", "ccc"])
+        self.round_trip_array(string_array_generator)
 
-    def test_string_without_none_roundtrip(self):
-        def string_array_generator():
-            return pa.array(["a", "bb", "ccc"])
-        self.roundtrip_array_test(string_array_generator)
-
-    def test_decimal_roundtrip(self):
+    def test_decimal_array(self):
         def decimal_array_generator():
             data = [
                 round(decimal.Decimal(722.82), 2),
@@ -88,21 +83,54 @@ class TestPythonToJava(unittest.TestCase):
                 None,
             ]
             return pa.array(data, pa.decimal128(5, 2))
-        self.roundtrip_array_test(decimal_array_generator)
+        self.round_trip_array(decimal_array_generator)
 
-    def test_int_roundtrip(self):
+    def test_int_array(self):
         def int_array_generator():
             return pa.array([1, 2, 3], type=pa.int32())
-        self.roundtrip_array_test(int_array_generator)
+        self.round_trip_array(int_array_generator)
 
     def test_list_array(self):
         def list_array_generator():
             return pa.array(
                 [[], [0], [1, 2], [4, 5, 6]], pa.list_(pa.int64())
             )
-        self.roundtrip_array_test(list_array_generator)
+        self.round_trip_array(list_array_generator)
 
-    def roundtrip_array_test(self, array_generator):
+    def test_struct_array(self):
+        def struct_array_generator():
+            fields = [
+                ("f1", pa.int32()),
+                ("f2", pa.string()),
+            ]
+            return pa.array(
+                [
+                    {"f1": 1, "f2": "a"},
+                    None,
+                    {"f1": 3, "f2": None},
+                    {"f1": None, "f2": "d"},
+                    {"f1": None, "f2": None},
+                ],
+                pa.struct(fields),
+            )
+        self.round_trip_array(struct_array_generator)
+
+    def test_field(self):
+        def bool_field_generator():
+            pa.field("aa", pa.bool_())
+        self.round_trip_field(bool_field_generator)
+
+    def test_field_nested(self):
+        def nested_field_generator():
+            return pa.field("test", pa.list_(pa.int32()), nullable=True)
+        self.round_trip_field(nested_field_generator)
+
+    def test_field_metadata(self):
+        def metadata_field_generator():
+            return pa.field("aa", pa.bool_(), {"a": "b"})
+        self.round_trip_field(metadata_field_generator)
+
+    def round_trip_array(self, array_generator):
         original_arr = array_generator()
         arrow_array_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(self.allocator)
         arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
@@ -139,12 +167,46 @@ class TestPythonToJava(unittest.TestCase):
 
         del arr_new
 
+        # release java resources
         vector.close()
         arrow_array_pj.close()
         arrow_schema_pj.close()
         arrow_array_jp.close()
         arrow_schema_jp.close()
-        print("end of roundtrip_array_test")
+        print("end of round_trip_array")
+
+    def round_trip_field(self, field_generator):
+        field1 = field_generator()
+        field2 = field_generator()
+        arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
+
+        # Export from pyarrow
+        print("Export from pyarrow")
+        arrow_schema_ptr_pj = arrow_schema_pj.memoryAddress()
+        field1._export_to_c(arrow_schema_ptr_pj)
+        del field1
+
+        # Import to Java
+        print("importing to java")
+        jfield = jpype.JPackage("org").apache.arrow.ffi.FFI.importField(self.allocator, arrow_schema_pj, None)
+
+        # Export from Java
+        print("Export from Java")
+        arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
+
+        jpype.JPackage("org").apache.arrow.ffi.exportField(self.allocator, jfield, None, arrow_schema_jp)
+
+        # Import to pyarrow
+        print("Import back to pyarrow")
+        arrow_schema_ptr_jp = arrow_schema_jp.memoryAddress()
+        field3 = pa.Field._import_from_c(arrow_schema_ptr_jp)
+
+        assert field2 == field3
+
+        # release resources
+        arrow_schema_pj.close()
+        arrow_schema_jp.close()
+        print("end of round_trip_field")
 
 
 if __name__ == '__main__':
