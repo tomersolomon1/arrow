@@ -15,14 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import os
-import pyarrow as pa
-import sys
-import xml.etree.ElementTree as ET
-import gc
-import unittest
-import jpype
 import decimal
+import gc
+import os
+import sys
+import unittest
+import xml.etree.ElementTree as ET
+
+import jpype
+import pyarrow as pa
+from pyarrow.cffi import ffi
 
 
 def setup_jvm():
@@ -30,7 +32,8 @@ def setup_jvm():
     try:
         arrow_dir = os.environ["ARROW_SOURCE_DIR"]
     except KeyError:
-        arrow_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')
+        arrow_dir = os.path.join(os.path.dirname(
+            __file__), '..', '..', '..', '..')
     pom_path = os.path.join(arrow_dir, 'java', 'pom.xml')
     print(pom_path)
     tree = ET.parse(pom_path)
@@ -45,7 +48,8 @@ def setup_jvm():
     jar_path = os.getenv("ARROW_TOOLS_JAR", jar_path)
 
     # Manual for now
-    jar_path += ":{}".format(os.path.join(arrow_dir, "java", "ffi/target/arrow-ffi-6.0.0-SNAPSHOT.jar"))
+    jar_path += ":{}".format(os.path.join(arrow_dir,
+                                          "java", "ffi/target/arrow-ffi-6.0.0-SNAPSHOT.jar"))
     print(jar_path)
     kwargs = {}
     # This will be the default behaviour in jpype 0.8+
@@ -55,193 +59,178 @@ def setup_jvm():
                    **kwargs)
 
 
-class TestPythonToJava(unittest.TestCase):
+class Bridge:
+    def __init__(self) -> None:
+        self.allocator = jpype.JPackage(
+            "org").apache.arrow.memory.RootAllocator(sys.maxsize)
+        self.jffi = jpype.JPackage("org").apache.arrow.ffi
+
+    def java_to_python_field(self, jfield):
+        c_schema = ffi.new("struct ArrowSchema*")
+        ptr_schema = int(ffi.cast("uintptr_t", c_schema))
+        self.jffi.FFI.exportField(self.allocator, jfield, None,
+                                  self.jffi.ArrowSchema.wrap(ptr_schema))
+        return pa.Field._import_from_c(ptr_schema)
+
+    def java_to_python_array(self, vector):
+        c_schema = ffi.new("struct ArrowSchema*")
+        ptr_schema = int(ffi.cast("uintptr_t", c_schema))
+        c_array = ffi.new("struct ArrowArray*")
+        ptr_array = int(ffi.cast("uintptr_t", c_array))
+        self.jffi.FFI.exportVector(self.allocator, vector, None, self.jffi.ArrowArray.wrap(
+            ptr_array), self.jffi.ArrowSchema.wrap(ptr_schema))
+        return pa.Array._import_from_c(ptr_array, ptr_schema)
+
+    def java_to_python_record_batch(self, root):
+        c_schema = ffi.new("struct ArrowSchema*")
+        ptr_schema = int(ffi.cast("uintptr_t", c_schema))
+        c_array = ffi.new("struct ArrowArray*")
+        ptr_array = int(ffi.cast("uintptr_t", c_array))
+        self.jffi.FFI.exportVectorSchemaRoot(self.allocator, root, None, self.jffi.ArrowArray.wrap(
+            ptr_array), self.jffi.ArrowSchema.wrap(ptr_schema))
+        return pa.RecordBatch._import_from_c(ptr_array, ptr_schema)
+
+    def python_to_java_field(self, field):
+        c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
+        field._export_to_c(c_schema.memoryAddress())
+        return self.jffi.FFI.importField(self.allocator, c_schema, None)
+
+    def python_to_java_array(self, array):
+        c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
+        c_array = self.jffi.ArrowArray.allocateNew(self.allocator)
+        array._export_to_c(c_array.memoryAddress(), c_schema.memoryAddress())
+        return self.jffi.FFI.importVector(self.allocator, c_array, c_schema, None)
+
+    def python_to_java_record_batch(self, record_batch):
+        c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
+        c_array = self.jffi.ArrowArray.allocateNew(self.allocator)
+        record_batch._export_to_c(
+            c_array.memoryAddress(), c_schema.memoryAddress())
+        # TODO: swap array and schema in Java API for consistency
+        return self.jffi.FFI.importVectorSchemaRoot(self.allocator, c_schema, c_array, None)
+
+    def close(self):
+        self.allocator.close()
+
+
+class TestPythonIntegration(unittest.TestCase):
     def setUp(self):
         gc.collect()
         self.old_allocated_python = pa.total_allocated_bytes()
-        self.allocator = jpype.JPackage("org").apache.arrow.memory.RootAllocator(sys.maxsize)
+        self.bridge = Bridge()
 
     def tearDown(self):
-        self.allocator.close()
+        self.bridge.close()
         gc.collect()
         diff_python = pa.total_allocated_bytes() - self.old_allocated_python
         self.assertEqual(
             pa.total_allocated_bytes(), self.old_allocated_python,
             f"PyArrow memory was not adequately released: {diff_python} bytes lost")
-        self.allocator.close()
-
-    @unittest.skip("skipping")
-    def test_string_array(self):
-        def string_array_generator():
-            return pa.array([None, "a", "bb", "ccc"])
-        self.round_trip_array(string_array_generator)
-
-    @unittest.skip("skipping")
-    def test_decimal_array(self):
-        def decimal_array_generator():
-            data = [
-                round(decimal.Decimal(722.82), 2),
-                round(decimal.Decimal(-934.11), 2),
-                None,
-            ]
-            return pa.array(data, pa.decimal128(5, 2))
-        self.round_trip_array(decimal_array_generator)
-
-    @unittest.skip("skipping")
-    def test_int_array(self):
-        def int_array_generator():
-            return pa.array([1, 2, 3], type=pa.int32())
-        self.round_trip_array(int_array_generator)
-
-    @unittest.skip("bug in arrow-java")
-    def test_list_array(self):
-        def list_array_generator():
-            return pa.array(
-                [[], [0], [1, 2], [4, 5, 6]], pa.list_(pa.int64())
-            )
-        self.round_trip_array(list_array_generator)
-
-    @unittest.skip("skipping")
-    def test_struct_array(self):
-        def struct_array_generator():
-            fields = [
-                ("f1", pa.int32()),
-                ("f2", pa.string()),
-            ]
-            return pa.array(
-                [
-                    {"f1": 1, "f2": "a"},
-                    None,
-                    {"f1": 3, "f2": None},
-                    {"f1": None, "f2": "d"},
-                    {"f1": None, "f2": None},
-                ],
-                pa.struct(fields),
-            )
-        self.round_trip_array(struct_array_generator)
-
-    def test_sparse_union_array(self):
-        def sparse_union_array_generator():
-            return pa.UnionArray.from_sparse(
-                pa.array([0, 1, 1, 0, 1], pa.int8()),
-                [
-                    pa.array(["a", "", "", "", "c"], pa.utf8()),
-                    pa.array([0, 1, 2, None, 0], pa.int64()),
-                ],
-            )
-        self.round_trip_array(sparse_union_array_generator)
-
-    def test_dense_union_array(self):
-        def dense_union_array_generator():
-            return pa.UnionArray.from_dense(
-                pa.array([0, 1, 1, 0, 1], pa.int8()),
-                pa.array([0, 1, 2, 3, 4], type=pa.int32()),
-                [
-                    pa.array(["a", "", "", "", "c"], pa.utf8()),
-                    pa.array([0, 1, 2, None, 0], pa.int64()),
-                ],
-            )
-        self.round_trip_array(dense_union_array_generator)
-
-    @unittest.skip("need to upgrade pyarrow")
-    def test_field(self):
-        def bool_field_generator():
-            pa.field("aa", pa.bool_())
-        self.round_trip_field(bool_field_generator)
-
-    @unittest.skip("need to upgrade pyarrow")
-    def test_field_nested(self):
-        def nested_field_generator():
-            return pa.field("test", pa.list_(pa.int32()), nullable=True)
-        self.round_trip_field(nested_field_generator)
-
-    @unittest.skip("need to upgrade pyarrow")
-    def test_field_metadata(self):
-        def metadata_field_generator():
-            return pa.field("aa", pa.bool_(), {"a": "b"})
-        self.round_trip_field(metadata_field_generator)
-
-    def round_trip_array(self, array_generator):
-        original_arr = array_generator()
-        arrow_array_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(self.allocator)
-        arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
-        arrow_arr_ptr_pj = arrow_array_pj.memoryAddress()
-        arrow_schema_ptr_pj = arrow_schema_pj.memoryAddress()
-        py_value = original_arr.to_pylist()
-        print("py array: {}".format(py_value))
-        py_type = original_arr.type
-
-        # Export from pyarrow
-        print("Export from pyarrow")
-        original_arr._export_to_c(arrow_arr_ptr_pj, arrow_schema_ptr_pj)
-        del original_arr
-
-        # Import into Java
-        print("importing to java")
-        vector = jpype.JPackage("org").apache.arrow.ffi.FFI.importVector(self.allocator, arrow_array_pj,
-                                                                         arrow_schema_pj, None)
-
-        # Export from Java
-        print("Export from Java")
-        arrow_array_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowArray.allocateNew(self.allocator)
-        arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
-        arrow_arr_ptr_jp = arrow_array_jp.memoryAddress()
-        arrow_schema_ptr_jp = arrow_schema_jp.memoryAddress()
-        jpype.JPackage("org").apache.arrow.ffi.FFI.exportVector(self.allocator, vector, None, arrow_array_jp, arrow_schema_jp)
-
-        # Import back to pyarrow
-        print("Import back to pyarrow")
-        arr_new = pa.Array._import_from_c(arrow_arr_ptr_jp, arrow_schema_ptr_jp)
-
-        # Assert everything is fine
-        assert arr_new.to_pylist() == py_value
-        assert arr_new.type == py_type
-
-        del arr_new
-
-        # release java resources
-        vector.close()
-        arrow_array_pj.close()
-        arrow_schema_pj.close()
-        arrow_array_jp.close()
-        arrow_schema_jp.close()
-        print("end of round_trip_array")
 
     def round_trip_field(self, field_generator):
-        field1 = field_generator()
-        field2 = field_generator()
-        arrow_schema_pj = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
+        original_field = field_generator()
+        java_field = self.bridge.python_to_java_field(original_field)
+        del original_field
+        new_field = self.bridge.java_to_python_field(java_field)
+        del java_field
 
-        # Export from pyarrow
-        print("Export from pyarrow")
-        arrow_schema_ptr_pj = arrow_schema_pj.memoryAddress()
-        field1._export_to_c(arrow_schema_ptr_pj)
-        del field1
+        expected = field_generator()
+        self.assertEqual(expected, new_field)
 
-        # Import to Java
-        print("importing to java")
-        jfield = jpype.JPackage("org").apache.arrow.ffi.FFI.importField(self.allocator, arrow_schema_pj, None)
+    def round_trip_array(self, array_generator, expectedDiff=None):
+        original_arr = array_generator()
+        with self.bridge.python_to_java_array(original_arr) as vector:
+            del original_arr
+            new_array = self.bridge.java_to_python_array(vector)
 
-        # Export from Java
-        print("Export from Java")
-        arrow_schema_jp = jpype.JPackage("org").apache.arrow.ffi.ArrowSchema.allocateNew(self.allocator)
+        expected = array_generator()
+        if expectedDiff:
+            self.assertEqual(expected, new_array.view(expected.type))
+        self.assertEqual(expected.diff(new_array), expectedDiff or '')
+        # self.assertEqual(expected, new_array, expected.diff(new_array))
 
-        jpype.JPackage("org").apache.arrow.ffi.exportField(self.allocator, jfield, None, arrow_schema_jp)
+    def round_trip_record_batch(self, rb_generator):
+        original_rb = rb_generator()
+        with self.bridge.python_to_java_record_batch(original_rb) as root:
+            del original_rb
+            new_rb = self.bridge.java_to_python_record_batch(root)
 
-        # Import to pyarrow
-        print("Import back to pyarrow")
-        arrow_schema_ptr_jp = arrow_schema_jp.memoryAddress()
-        field3 = pa.Field._import_from_c(arrow_schema_ptr_jp)
+        expected = rb_generator()
+        self.assertEqual(expected, new_rb)
 
-        assert field2 == field3
+    def test_string_array(self):
+        self.round_trip_array(lambda: pa.array([None, "a", "bb", "ccc"]))
 
-        # release resources
-        arrow_schema_pj.close()
-        arrow_schema_jp.close()
-        print("end of round_trip_field")
+    def test_decimal_array(self):
+        data = [
+            round(decimal.Decimal(722.82), 2),
+            round(decimal.Decimal(-934.11), 2),
+            None,
+        ]
+        self.round_trip_array(lambda: pa.array(data, pa.decimal128(5, 2)))
+
+    def test_int_array(self):
+        self.round_trip_array(lambda: pa.array([1, 2, 3], type=pa.int32()))
+
+    def test_list_array(self):
+        self.round_trip_array(lambda: pa.array(
+            [[], [0], [1, 2], [4, 5, 6]], pa.list_(pa.int64())
+        ), "# Array types differed: list<item: int64> vs list<$data$: int64>\n")
+
+    def test_struct_array(self):
+        fields = [
+            ("f1", pa.int32()),
+            ("f2", pa.string()),
+        ]
+        data = [
+            {"f1": 1, "f2": "a"},
+            None,
+            {"f1": 3, "f2": None},
+            {"f1": None, "f2": "d"},
+            {"f1": None, "f2": None},
+        ]
+        self.round_trip_array(lambda: pa.array(data, type=pa.struct(fields)))
+
+    def test_field(self):
+        self.round_trip_field(lambda: pa.field("aa", pa.bool_()))
+
+    def test_field_nested(self):
+        self.round_trip_field(lambda: pa.field(
+            "test", pa.list_(pa.int32()), nullable=True))
+
+    def test_field_metadata(self):
+        self.round_trip_field(lambda: pa.field("aa", pa.bool_(), {"a": "b"}))
+
+    def test_record_batch_with_list(self):
+        data = [
+            pa.array([[1], [2], [3], [4, 5, 6]]),
+            pa.array([1, 2, 3, 4]),
+            pa.array(['foo', 'bar', 'baz', None]),
+            pa.array([True, None, False, True])
+        ]
+        self.round_trip_record_batch(
+            lambda: pa.RecordBatch.from_arrays(data, ['f0', 'f1', 'f2', 'f3']))
+
+    def test_dense_union_array(self):
+        types = pa.array([0, 1, 1, 0, 1], pa.int8())
+        data = [
+            pa.array(["a", "", "", "", "c"], pa.utf8()),
+            pa.array([0, 1, 2, None, 0], pa.int64()),
+        ]
+        self.round_trip_array(
+            lambda: pa.UnionArray.from_sparse(types, data))
+
+    def test_dense_union_array(self):
+        types = pa.array([0, 1, 1, 0, 1], pa.int8())
+        offsets = pa.array([0, 1, 2, 3, 4], type=pa.int32())
+        data = [
+            pa.array(["a", "", "", "", "c"], pa.utf8()),
+            pa.array([0, 1, 2, None, 0], pa.int64()),
+        ]
+        self.round_trip_array(
+            lambda: pa.UnionArray.from_dense(types, offsets, data))
 
 
 if __name__ == '__main__':
     setup_jvm()
-    #input("pause to attach debugger")
     unittest.main(verbosity=2)
