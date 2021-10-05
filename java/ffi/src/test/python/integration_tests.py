@@ -34,8 +34,7 @@ def setup_jvm():
     except KeyError:
         arrow_dir = os.path.join(os.path.dirname(
             __file__), '..', '..', '..', '..')
-    pom_path = os.path.join(arrow_dir, 'java', 'pom.xml')
-    print(pom_path)
+    pom_path = os.path.join(arrow_dir, '../java', 'pom.xml')
     tree = ET.parse(pom_path)
     version = tree.getroot().find(
         'POM:version',
@@ -43,20 +42,23 @@ def setup_jvm():
             'POM': 'http://maven.apache.org/POM/4.0.0'
         }).text
     jar_path = os.path.join(
-        arrow_dir, 'java', 'tools', 'target',
+        arrow_dir, '../java', 'tools', 'target',
         'arrow-tools-{}-jar-with-dependencies.jar'.format(version))
     jar_path = os.getenv("ARROW_TOOLS_JAR", jar_path)
-
-    # Manual for now
     jar_path += ":{}".format(os.path.join(arrow_dir,
-                                          "java", "ffi/target/arrow-ffi-6.0.0-SNAPSHOT.jar"))
-    print(jar_path)
+                                          "../java", "ffi/target/arrow-ffi-{}.jar".format(version)))
     kwargs = {}
     # This will be the default behaviour in jpype 0.8+
     kwargs['convertStrings'] = False
-    jpype.startJVM(jpype.getDefaultJVMPath(), "-Djava.class.path=" + jar_path, "-Xint", "-Xdebug", "-Xnoagent",
-                   "-Xrunjdwp:transport=dt_socket,server=y,address=12999,suspend=n",
-                   **kwargs)
+    jpype.startJVM(jpype.getDefaultJVMPath(), "-Djava.class.path=" + jar_path, **kwargs)
+
+
+class UuidType(pa.PyExtensionType):
+    def __init__(self):
+        super().__init__(pa.binary(16))
+
+    def __reduce__(self):
+        return UuidType, ()
 
 
 class Bridge:
@@ -72,12 +74,12 @@ class Bridge:
                                   self.jffi.ArrowSchema.wrap(ptr_schema))
         return pa.Field._import_from_c(ptr_schema)
 
-    def java_to_python_array(self, vector):
+    def java_to_python_array(self, vector, dictionary_provider=None):
         c_schema = ffi.new("struct ArrowSchema*")
         ptr_schema = int(ffi.cast("uintptr_t", c_schema))
         c_array = ffi.new("struct ArrowArray*")
         ptr_array = int(ffi.cast("uintptr_t", c_array))
-        self.jffi.FFI.exportVector(self.allocator, vector, None, self.jffi.ArrowArray.wrap(
+        self.jffi.FFI.exportVector(self.allocator, vector, dictionary_provider, self.jffi.ArrowArray.wrap(
             ptr_array), self.jffi.ArrowSchema.wrap(ptr_schema))
         return pa.Array._import_from_c(ptr_array, ptr_schema)
 
@@ -95,11 +97,11 @@ class Bridge:
         field._export_to_c(c_schema.memoryAddress())
         return self.jffi.FFI.importField(self.allocator, c_schema, None)
 
-    def python_to_java_array(self, array):
+    def python_to_java_array(self, array, dictionary_provider=None):
         c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
         c_array = self.jffi.ArrowArray.allocateNew(self.allocator)
         array._export_to_c(c_array.memoryAddress(), c_schema.memoryAddress())
-        return self.jffi.FFI.importVector(self.allocator, c_array, c_schema, None)
+        return self.jffi.FFI.importVector(self.allocator, c_array, c_schema, dictionary_provider)
 
     def python_to_java_record_batch(self, record_batch):
         c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
@@ -137,16 +139,19 @@ class TestPythonIntegration(unittest.TestCase):
         expected = field_generator()
         self.assertEqual(expected, new_field)
 
-    def round_trip_array(self, array_generator, expectedDiff=None):
+    def round_trip_array(self, array_generator, expected_diff=None):
         original_arr = array_generator()
-        with self.bridge.python_to_java_array(original_arr) as vector:
+        with self.bridge.jffi.FFIDictionaryProvider() as dictionary_provider,\
+                self.bridge.python_to_java_array(original_arr, dictionary_provider) as vector:
             del original_arr
-            new_array = self.bridge.java_to_python_array(vector)
+            new_array = self.bridge.java_to_python_array(vector, dictionary_provider)
 
         expected = array_generator()
-        if expectedDiff:
+        if expected_diff:
             self.assertEqual(expected, new_array.view(expected.type))
-        self.assertEqual(expected.diff(new_array), expectedDiff or '')
+        self.assertEqual(expected.diff(new_array), expected_diff or '')
+        if dictionary_provider:
+            dictionary_provider.close()
         # self.assertEqual(expected, new_array, expected.diff(new_array))
 
     def round_trip_record_batch(self, rb_generator):
@@ -191,6 +196,40 @@ class TestPythonIntegration(unittest.TestCase):
         ]
         self.round_trip_array(lambda: pa.array(data, type=pa.struct(fields)))
 
+    @unittest.skip("bug in union")
+    def test_dense_union_array(self):
+        types = pa.array([0, 1, 1, 0, 1], pa.int8())
+        data = [
+            pa.array(["a", "", "", "", "c"], pa.utf8()),
+            pa.array([0, 1, 2, None, 0], pa.int64()),
+        ]
+        self.round_trip_array(
+            lambda: pa.UnionArray.from_sparse(types, data))
+
+    @unittest.skip("bug in union")
+    def test_dense_union_array(self):
+        types = pa.array([0, 1, 1, 0, 1], pa.int8())
+        offsets = pa.array([0, 1, 2, 3, 4], type=pa.int32())
+        data = [
+            pa.array(["a", "", "", "", "c"], pa.utf8()),
+            pa.array([0, 1, 2, None, 0], pa.int64()),
+        ]
+        self.round_trip_array(
+            lambda: pa.UnionArray.from_dense(types, offsets, data))
+
+    def test_dict(self):
+        self.round_trip_array(
+            lambda: pa.array(["a", "b", None, "d"], pa.dictionary(pa.int64(), pa.utf8())))
+
+    def test_map(self):
+        offsets = [0, None, 2, 6]
+        pykeys = [b"a", b"b", b"c", b"d", b"e", b"f"]
+        pyitems = [1, 2, 3, None, 4, 5]
+        keys = pa.array(pykeys, type="binary")
+        items = pa.array(pyitems, type="i4")
+        self.round_trip_array(
+            lambda: pa.MapArray.from_arrays(offsets, keys, items))
+
     def test_field(self):
         self.round_trip_field(lambda: pa.field("aa", pa.bool_()))
 
@@ -201,6 +240,10 @@ class TestPythonIntegration(unittest.TestCase):
     def test_field_metadata(self):
         self.round_trip_field(lambda: pa.field("aa", pa.bool_(), {"a": "b"}))
 
+    @unittest.skip("not supported by the latest released version yet")
+    def test_field_extension(self):
+        self.round_trip_field(lambda: pa.field("aa", UuidType()))
+
     def test_record_batch_with_list(self):
         data = [
             pa.array([[1], [2], [3], [4, 5, 6]]),
@@ -210,25 +253,6 @@ class TestPythonIntegration(unittest.TestCase):
         ]
         self.round_trip_record_batch(
             lambda: pa.RecordBatch.from_arrays(data, ['f0', 'f1', 'f2', 'f3']))
-
-    def test_dense_union_array(self):
-        types = pa.array([0, 1, 1, 0, 1], pa.int8())
-        data = [
-            pa.array(["a", "", "", "", "c"], pa.utf8()),
-            pa.array([0, 1, 2, None, 0], pa.int64()),
-        ]
-        self.round_trip_array(
-            lambda: pa.UnionArray.from_sparse(types, data))
-
-    def test_dense_union_array(self):
-        types = pa.array([0, 1, 1, 0, 1], pa.int8())
-        offsets = pa.array([0, 1, 2, 3, 4], type=pa.int32())
-        data = [
-            pa.array(["a", "", "", "", "c"], pa.utf8()),
-            pa.array([0, 1, 2, None, 0], pa.int64()),
-        ]
-        self.round_trip_array(
-            lambda: pa.UnionArray.from_dense(types, offsets, data))
 
 
 if __name__ == '__main__':
