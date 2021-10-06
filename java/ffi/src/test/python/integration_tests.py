@@ -196,7 +196,6 @@ class TestPythonIntegration(unittest.TestCase):
         ]
         self.round_trip_array(lambda: pa.array(data, type=pa.struct(fields)))
 
-    @unittest.skip("bug in union")
     def test_sparse_union_array(self):
         types = pa.array([0, 1, 1, 0, 1], pa.int8())
         data = [
@@ -206,7 +205,6 @@ class TestPythonIntegration(unittest.TestCase):
         self.round_trip_array(
             lambda: pa.UnionArray.from_sparse(types, data))
 
-    @unittest.skip("bug in union")
     def test_dense_union_array(self):
         types = pa.array([0, 1, 1, 0, 1], pa.int8())
         offsets = pa.array([0, 1, 2, 3, 4], type=pa.int32())
