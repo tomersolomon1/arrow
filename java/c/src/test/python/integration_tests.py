@@ -33,8 +33,8 @@ def setup_jvm():
         arrow_dir = os.environ["ARROW_SOURCE_DIR"]
     except KeyError:
         arrow_dir = os.path.join(os.path.dirname(
-            __file__), '..', '..', '..', '..')
-    pom_path = os.path.join(arrow_dir, '../java', 'pom.xml')
+            __file__), '..', '..', '..', '..', '..')
+    pom_path = os.path.join(arrow_dir, 'java', 'pom.xml')
     tree = ET.parse(pom_path)
     version = tree.getroot().find(
         'POM:version',
@@ -42,11 +42,11 @@ def setup_jvm():
             'POM': 'http://maven.apache.org/POM/4.0.0'
         }).text
     jar_path = os.path.join(
-        arrow_dir, '../java', 'tools', 'target',
+        arrow_dir, 'java', 'tools', 'target',
         'arrow-tools-{}-jar-with-dependencies.jar'.format(version))
     jar_path = os.getenv("ARROW_TOOLS_JAR", jar_path)
     jar_path += ":{}".format(os.path.join(arrow_dir,
-                                          "../java", "ffi/target/arrow-ffi-{}.jar".format(version)))
+                                          "java", "c/target/arrow-c-data-{}.jar".format(version)))
     kwargs = {}
     # This will be the default behaviour in jpype 0.8+
     kwargs['convertStrings'] = False
@@ -65,13 +65,13 @@ class Bridge:
     def __init__(self) -> None:
         self.allocator = jpype.JPackage(
             "org").apache.arrow.memory.RootAllocator(sys.maxsize)
-        self.jffi = jpype.JPackage("org").apache.arrow.ffi
+        self.jc = jpype.JPackage("org").apache.arrow.c
 
     def java_to_python_field(self, jfield):
         c_schema = ffi.new("struct ArrowSchema*")
         ptr_schema = int(ffi.cast("uintptr_t", c_schema))
-        self.jffi.FFI.exportField(self.allocator, jfield, None,
-                                  self.jffi.ArrowSchema.wrap(ptr_schema))
+        self.jc.Data.exportField(self.allocator, jfield, None,
+                                self.jc.ArrowSchema.wrap(ptr_schema))
         return pa.Field._import_from_c(ptr_schema)
 
     def java_to_python_array(self, vector, dictionary_provider=None):
@@ -79,8 +79,8 @@ class Bridge:
         ptr_schema = int(ffi.cast("uintptr_t", c_schema))
         c_array = ffi.new("struct ArrowArray*")
         ptr_array = int(ffi.cast("uintptr_t", c_array))
-        self.jffi.FFI.exportVector(self.allocator, vector, dictionary_provider, self.jffi.ArrowArray.wrap(
-            ptr_array), self.jffi.ArrowSchema.wrap(ptr_schema))
+        self.jc.Data.exportVector(self.allocator, vector, dictionary_provider, self.jc.ArrowArray.wrap(
+            ptr_array), self.jc.ArrowSchema.wrap(ptr_schema))
         return pa.Array._import_from_c(ptr_array, ptr_schema)
 
     def java_to_python_record_batch(self, root):
@@ -88,28 +88,28 @@ class Bridge:
         ptr_schema = int(ffi.cast("uintptr_t", c_schema))
         c_array = ffi.new("struct ArrowArray*")
         ptr_array = int(ffi.cast("uintptr_t", c_array))
-        self.jffi.FFI.exportVectorSchemaRoot(self.allocator, root, None, self.jffi.ArrowArray.wrap(
-            ptr_array), self.jffi.ArrowSchema.wrap(ptr_schema))
+        self.jc.Data.exportVectorSchemaRoot(self.allocator, root, None, self.jc.ArrowArray.wrap(
+            ptr_array), self.jc.ArrowSchema.wrap(ptr_schema))
         return pa.RecordBatch._import_from_c(ptr_array, ptr_schema)
 
     def python_to_java_field(self, field):
-        c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
+        c_schema = self.jc.ArrowSchema.allocateNew(self.allocator)
         field._export_to_c(c_schema.memoryAddress())
-        return self.jffi.FFI.importField(self.allocator, c_schema, None)
+        return self.jc.Data.importField(self.allocator, c_schema, None)
 
     def python_to_java_array(self, array, dictionary_provider=None):
-        c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
-        c_array = self.jffi.ArrowArray.allocateNew(self.allocator)
+        c_schema = self.jc.ArrowSchema.allocateNew(self.allocator)
+        c_array = self.jc.ArrowArray.allocateNew(self.allocator)
         array._export_to_c(c_array.memoryAddress(), c_schema.memoryAddress())
-        return self.jffi.FFI.importVector(self.allocator, c_array, c_schema, dictionary_provider)
+        return self.jc.Data.importVector(self.allocator, c_array, c_schema, dictionary_provider)
 
     def python_to_java_record_batch(self, record_batch):
-        c_schema = self.jffi.ArrowSchema.allocateNew(self.allocator)
-        c_array = self.jffi.ArrowArray.allocateNew(self.allocator)
+        c_schema = self.jc.ArrowSchema.allocateNew(self.allocator)
+        c_array = self.jc.ArrowArray.allocateNew(self.allocator)
         record_batch._export_to_c(
             c_array.memoryAddress(), c_schema.memoryAddress())
         # TODO: swap array and schema in Java API for consistency
-        return self.jffi.FFI.importVectorSchemaRoot(self.allocator, c_schema, c_array, None)
+        return self.jc.Data.importVectorSchemaRoot(self.allocator, c_schema, c_array, None)
 
     def close(self):
         self.allocator.close()
@@ -141,7 +141,7 @@ class TestPythonIntegration(unittest.TestCase):
 
     def round_trip_array(self, array_generator, expected_diff=None):
         original_arr = array_generator()
-        with self.bridge.jffi.FFIDictionaryProvider() as dictionary_provider,\
+        with self.bridge.jc.CDataDictionaryProvider() as dictionary_provider,\
                 self.bridge.python_to_java_array(original_arr, dictionary_provider) as vector:
             del original_arr
             new_array = self.bridge.java_to_python_array(vector, dictionary_provider)
@@ -196,25 +196,6 @@ class TestPythonIntegration(unittest.TestCase):
         ]
         self.round_trip_array(lambda: pa.array(data, type=pa.struct(fields)))
 
-    def test_sparse_union_array(self):
-        types = pa.array([0, 1, 1, 0, 1], pa.int8())
-        data = [
-            pa.array(["a", "", "", "", "c"], pa.utf8()),
-            pa.array([0, 1, 2, None, 0], pa.int64()),
-        ]
-        self.round_trip_array(
-            lambda: pa.UnionArray.from_sparse(types, data))
-
-    def test_dense_union_array(self):
-        types = pa.array([0, 1, 1, 0, 1], pa.int8())
-        offsets = pa.array([0, 1, 2, 3, 4], type=pa.int32())
-        data = [
-            pa.array(["a", "", "", "", "c"], pa.utf8()),
-            pa.array([0, 1, 2, None, 0], pa.int64()),
-        ]
-        self.round_trip_array(
-            lambda: pa.UnionArray.from_dense(types, offsets, data))
-
     def test_dict(self):
         self.round_trip_array(
             lambda: pa.array(["a", "b", None, "d"], pa.dictionary(pa.int64(), pa.utf8())))
@@ -237,10 +218,6 @@ class TestPythonIntegration(unittest.TestCase):
 
     def test_field_metadata(self):
         self.round_trip_field(lambda: pa.field("aa", pa.bool_(), {"a": "b"}))
-
-    @unittest.skip("not supported by the latest released version yet")
-    def test_field_extension(self):
-        self.round_trip_field(lambda: pa.field("aa", UuidType()))
 
     def test_record_batch_with_list(self):
         data = [
