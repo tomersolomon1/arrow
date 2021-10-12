@@ -150,9 +150,6 @@ class TestPythonIntegration(unittest.TestCase):
         if expected_diff:
             self.assertEqual(expected, new_array.view(expected.type))
         self.assertEqual(expected.diff(new_array), expected_diff or '')
-        if dictionary_provider:
-            dictionary_provider.close()
-        # self.assertEqual(expected, new_array, expected.diff(new_array))
 
     def round_trip_record_batch(self, rb_generator):
         original_rb = rb_generator()
