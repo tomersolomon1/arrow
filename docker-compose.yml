@@ -116,8 +116,8 @@ x-hierarchy:
     - debian-go-cgo
     - debian-go-cgo-python
   - debian-java:
-    - debian-java-jni
-      - debian-java-integration
+    - debian-java-jni:
+        - debian-java-integration
   - debian-js
   - fedora-cpp:
     - fedora-python
