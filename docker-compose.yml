@@ -98,8 +98,10 @@ x-hierarchy:
   - conda:
     - conda-cpp:
       - conda-cpp-hiveserver2
+      - dd
       - conda-cpp-valgrind
       - conda-python:
+        -
         - conda-python-pandas
         - conda-python-dask
         - conda-python-hdfs
@@ -116,7 +118,7 @@ x-hierarchy:
     - debian-go-cgo
     - debian-go-cgo-python
   - debian-java:
-    - debian-java-jni
+    - debian-java-jni:
       - debian-java-integration
   - debian-js
   - fedora-cpp:
