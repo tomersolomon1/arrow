@@ -117,6 +117,7 @@ x-hierarchy:
     - debian-go-cgo-python
   - debian-java:
     - debian-java-jni
+      - debian-java-integration
   - debian-js
   - fedora-cpp:
     - fedora-python
@@ -1336,6 +1337,35 @@ services:
         /arrow/ci/scripts/java_cdata_build.sh /arrow /build/java/c/build /build/java/c &&
         /arrow/ci/scripts/java_build.sh /arrow /build &&
         /arrow/ci/scripts/java_test.sh /arrow /build"
+
+  debian-java-integration:
+    # Usage:
+    #   docker-compose build debian-java
+    #   docker-compose build debian-java-jni
+    #   docker-compose build debian-java-integration
+    #   docker-compose run debian-java-integration
+    image: ${REPO}:${ARCH}-debian-9-java-${JDK}-maven-${MAVEN}-intgration
+    build:
+      context: .
+      dockerfile: ci/docker/linux-apt-jni.dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-debian-9-java-${JDK}-maven-${MAVEN}-intgration
+      args:
+        base: ${REPO}:${ARCH}-debian-9-java-${JDK}-maven-${MAVEN}-jni
+        llvm: ${LLVM}
+    shm_size: *shm-size
+    environment:
+      <<: *ccache
+    volumes:
+      - .:/arrow:delegated
+      - ${DOCKER_VOLUME_PREFIX}maven-cache:/root/.m2:delegated
+      - ${DOCKER_VOLUME_PREFIX}debian-ccache:/ccache:delegated
+    command:
+      /bin/bash -c "
+      /arrow/ci/scripts/cpp_build.sh /arrow /build &&
+      /arrow/ci/scripts/java_cdata_build.sh /arrow /build/java/c/build /build/java/c &&
+      /arrow/ci/scripts/java_build.sh /arrow /build &&
+      /arrow/ci/scripts/java_c_data_interface_integration.sh /arrow /build"
 
   ############################## Integration ##################################
 

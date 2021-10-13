@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -17,16 +15,22 @@
 # specific language governing permissions and limitations
 # under the License.
 
-set -ex
+ARG base
+FROM ${base}
 
-arrow_dir=${1}
-source_dir=source_dir=${1}/java
+ENV DEBIAN_FRONTEND noninteractive
 
-export ARROW_SOURCE_DIR=${arrow_dir}
+# Install python3 and pip so we can install pyarrow to test the C data interface.
+RUN apt-get update -y -q && \
+    apt-get install -y -q --no-install-recommends \
+        python3 \
+        python3-pip && \
+    apt-get clean
 
-pushd ${source_dir}/c/src/test/python
+RUN ln -s /usr/bin/python3 /usr/local/bin/python && \
+    ln -s /usr/bin/pip3 /usr/local/bin/pip
 
-python integration_tests.py
+# Need a newer pip than Debian's to install manylinux201x wheels
+RUN pip install -U pip
 
-popd
-
+RUN pip install pyarrow cffi --only-binary pyarrow
