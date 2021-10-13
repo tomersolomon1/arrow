@@ -108,8 +108,7 @@ class Bridge:
         c_array = self.jc.ArrowArray.allocateNew(self.allocator)
         record_batch._export_to_c(
             c_array.memoryAddress(), c_schema.memoryAddress())
-        # TODO: swap array and schema in Java API for consistency
-        return self.jc.Data.importVectorSchemaRoot(self.allocator, c_schema, c_array, None)
+        return self.jc.Data.importVectorSchemaRoot(self.allocator, c_array, c_schema, None)
 
     def close(self):
         self.allocator.close()
