@@ -101,7 +101,6 @@ x-hierarchy:
       - dd
       - conda-cpp-valgrind
       - conda-python:
-        -
         - conda-python-pandas
         - conda-python-dask
         - conda-python-hdfs
@@ -119,7 +118,7 @@ x-hierarchy:
     - debian-go-cgo-python
   - debian-java:
     - debian-java-jni:
-      - debian-java-integration
+        - debian-java-integration
   - debian-js
   - fedora-cpp:
     - fedora-python
