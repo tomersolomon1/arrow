@@ -98,7 +98,6 @@ x-hierarchy:
   - conda:
     - conda-cpp:
       - conda-cpp-hiveserver2
-      - dd
       - conda-cpp-valgrind
       - conda-python:
         - conda-python-pandas
