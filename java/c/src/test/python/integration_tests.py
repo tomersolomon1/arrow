@@ -53,14 +53,6 @@ def setup_jvm():
     jpype.startJVM(jpype.getDefaultJVMPath(), "-Djava.class.path=" + jar_path, **kwargs)
 
 
-class UuidType(pa.PyExtensionType):
-    def __init__(self):
-        super().__init__(pa.binary(16))
-
-    def __reduce__(self):
-        return UuidType, ()
-
-
 class Bridge:
     def __init__(self) -> None:
         self.allocator = jpype.JPackage(
