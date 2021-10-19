@@ -1338,7 +1338,7 @@ services:
         /arrow/ci/scripts/java_build.sh /arrow /build &&
         /arrow/ci/scripts/java_test.sh /arrow /build"
 
-  java-integration:
+  conda-python-jpype-integration:
     # Usage:
     #   docker-compose build conda
     #   docker-compose build conda-cpp
