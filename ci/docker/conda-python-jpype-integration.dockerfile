@@ -28,10 +28,8 @@ ARG maven=3.6
 RUN echo '#! /bin/sh' > /usr/bin/mesg
 RUN chmod 755 /usr/bin/mesg
 
-RUN conda install -q \
-        maven=${maven} \
-        openjdk=${jdk} \
-        jpype1 && \
-    conda clean --all \
+RUN conda install -q maven=${maven} openjdk=${jdk} jpype1
+
+RUN conda clean --all
 
 ENV ARROW_JAVA_CDATA=ON
