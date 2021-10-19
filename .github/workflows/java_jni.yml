@@ -106,8 +106,8 @@ jobs:
       - name: Setup Archery
         run: pip install -e dev/archery[docker]
       - name: Execute Docker Build
-        run: archery docker run debian-java-jni
+        run: archery docker run debian-java-integration
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'apache/arrow'
         continue-on-error: true
-        run: archery docker push debian-java-jni
+        run: archery docker push debian-java-integration
