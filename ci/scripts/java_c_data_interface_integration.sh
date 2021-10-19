@@ -20,6 +20,7 @@
 set -ex
 
 arrow_dir=${1}
+
 export ARROW_SOURCE_DIR=${arrow_dir}
 
 pushd ${arrow_dir}/java/c/src/test/python
