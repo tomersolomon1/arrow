@@ -22,6 +22,12 @@ FROM ${repo}:${arch}-conda-python-${python}
 
 ARG jdk=11
 ARG maven=3.6
+
+
+# fixes "# mesg: ttyname failed: Inappropriate ioctl for device" warnings when building docker
+RUN echo '#! /bin/sh' > /usr/bin/mesg
+RUN chmod 755 /usr/bin/mesg
+
 RUN conda install -q \
         maven=${maven} \
         openjdk=${jdk} \
