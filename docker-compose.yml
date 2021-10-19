@@ -1359,18 +1359,17 @@ services:
     shm_size: *shm-size
     environment:
       <<: *ccache
-      ARROW_JAVA_CDATA: "ON"
     volumes:
       - .:/arrow:delegated
       - ${DOCKER_VOLUME_PREFIX}maven-cache:/root/.m2:delegated
       - ${DOCKER_VOLUME_PREFIX}debian-ccache:/ccache:delegated
     command:
       /bin/bash -c "
-      /arrow/ci/scripts/cpp_build.sh /arrow /build &&
-      /arrow/ci/scripts/python_build.sh /arrow /build &&
-      /arrow/ci/scripts/java_cdata_build.sh /arrow /build/java/c/build /build/java/c &&
-      /arrow/ci/scripts/java_build.sh /arrow /build &&
-      /arrow/ci/scripts/java_c_data_interface_integration.sh /arrow"
+        /arrow/ci/scripts/cpp_build.sh /arrow /build &&
+        /arrow/ci/scripts/python_build.sh /arrow /build &&
+        /arrow/ci/scripts/java_cdata_build.sh /arrow /build/java/c/build /build/java/c &&
+        /arrow/ci/scripts/java_build.sh /arrow /build &&
+        /arrow/ci/scripts/java_c_data_interface_integration.sh /arrow"
 
   ############################## Integration ##################################
 

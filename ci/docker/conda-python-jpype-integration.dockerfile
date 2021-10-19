@@ -32,4 +32,6 @@ RUN conda install -q \
         maven=${maven} \
         openjdk=${jdk} \
         jpype1 && \
-    conda clean --all
+    conda clean --all \
+
+ENV ARROW_JAVA_CDATA=ON
