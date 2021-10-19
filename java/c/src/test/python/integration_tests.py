@@ -54,7 +54,7 @@ def setup_jvm():
 
 
 class Bridge:
-    def __init__(self) -> None:
+    def __init__(self):
         self.allocator = jpype.JPackage(
             "org").apache.arrow.memory.RootAllocator(sys.maxsize)
         self.jc = jpype.JPackage("org").apache.arrow.c
