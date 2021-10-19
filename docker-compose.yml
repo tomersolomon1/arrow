@@ -1340,10 +1340,11 @@ services:
 
   debian-java-integration:
     # Usage:
-    #   docker-compose build debian-java
-    #   docker-compose build debian-java-jni
+    #   docker-compose build conda
+    #   docker-compose build conda-cpp
+    #   docker-compose build conda-python
     #   docker-compose build debian-java-integration
-    #   docker-compose run debian-java-integration
+    #   docker-compose run --rm debian-java-integration
     image: ${REPO}:${ARCH}-debian-9-java-${JDK}-maven-${MAVEN}-intgration
     build:
       context: .
@@ -1369,7 +1370,7 @@ services:
       /arrow/ci/scripts/python_build.sh /arrow /build &&
       /arrow/ci/scripts/java_cdata_build.sh /arrow /build/java/c/build /build/java/c &&
       /arrow/ci/scripts/java_build.sh /arrow /build &&
-      /arrow/ci/scripts/java_c_data_interface_integration.sh /arrow /build"
+      /arrow/ci/scripts/java_c_data_interface_integration.sh /arrow"
 
   ############################## Integration ##################################
 
