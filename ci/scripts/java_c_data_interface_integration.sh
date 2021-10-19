@@ -20,11 +20,10 @@
 set -ex
 
 arrow_dir=${1}
-source_dir=source_dir=${1}/java
 
 export ARROW_SOURCE_DIR=${arrow_dir}
 
-pushd ${source_dir}/c/src/test/python
+pushd ${arrow_dir}/java/c/src/test/python
 
 python integration_tests.py
 
