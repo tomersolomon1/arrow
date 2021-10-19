@@ -104,6 +104,7 @@ x-hierarchy:
         - conda-python-dask
         - conda-python-hdfs
         - conda-python-jpype
+        - conda-python-jpype-integration
         - conda-python-turbodbc
         - conda-python-kartothek
         - conda-python-spark
@@ -116,8 +117,7 @@ x-hierarchy:
     - debian-go-cgo
     - debian-go-cgo-python
   - debian-java:
-    - debian-java-jni:
-      - debian-java-integration
+    - debian-java-jni
   - debian-js
   - fedora-cpp:
     - fedora-python
@@ -1338,19 +1338,19 @@ services:
         /arrow/ci/scripts/java_build.sh /arrow /build &&
         /arrow/ci/scripts/java_test.sh /arrow /build"
 
-  debian-java-integration:
+  java-integration:
     # Usage:
     #   docker-compose build conda
     #   docker-compose build conda-cpp
     #   docker-compose build conda-python
-    #   docker-compose build debian-java-integration
-    #   docker-compose run --rm debian-java-integration
-    image: ${REPO}:${ARCH}-debian-9-java-${JDK}-maven-${MAVEN}-intgration
+    #   docker-compose build conda-python-jpype-integration
+    #   docker-compose run --rm conda-python-jpype-integration
+    image: ${REPO}:${ARCH}-conda-python-${PYTHON}-jpype-integration
     build:
       context: .
-      dockerfile: ci/docker/conda-python-jpype.dockerfile
+      dockerfile: ci/docker/conda-python-jpype-integration.dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-debian-9-java-${JDK}-maven-${MAVEN}-intgration
+        - ${REPO}:${ARCH}-conda-python-${PYTHON}-jpype-integration
       args:
         repo: ${REPO}
         arch: ${ARCH}
